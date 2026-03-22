@@ -272,6 +272,8 @@ jimeng-free-api-all/
 │       ├── exceptions/          # 异常类
 │       └── configs/             # 配置模式
 ├── configs/                     # 配置文件目录
+├── scripts/                     # 工具脚本目录
+│   └── logout-sessions.py       # 历史 Session 强制退出工具
 ├── doc/                         # 文档资源
 ├── Dockerfile                   # Docker 构建文件
 ├── package.json                 # 项目配置
@@ -453,6 +455,107 @@ npm start
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 创建 Pull Request
 
+## 安全管理：强制退出历史 Session
+
+### 场景说明
+
+即梦 AI 使用 ByteDance 账号体系，**重新登录不会使历史 sessionid 失效**（多设备并行机制）。当 sessionid 泄露、共享给他人或更换使用账号时，需要主动在服务器端将历史 session 强制注销。
+
+### 退出工具
+
+项目提供了 `scripts/logout-sessions.py` 脚本，通过 Playwright headless 浏览器自动化模拟用户点击"退出登录"操作，使指定 sessionid 在即梦服务器端彻底失效。
+
+**退出原理：**
+```
+注入 sessionid → 打开即梦主页 → 验证已登录
+  → 点击左侧「设置」按钮 → 弹出下拉菜单 → 点击「退出」
+  → 调用 /passport/web/logout/ 接口 → Session 服务器端销毁
+```
+
+### 安装依赖
+
+```bash
+# 安装 Python 依赖
+pip install playwright
+
+# 安装 Chromium 浏览器（首次使用）
+playwright install chromium
+```
+
+### 使用方法
+
+**方式一：命令行传入 sessionid（推荐）**
+
+```bash
+# 退出单个 sessionid
+python3 scripts/logout-sessions.py 73795a52a17c7ee7e95c213a22135c96
+
+# 批量退出多个 sessionid（空格分隔）
+python3 scripts/logout-sessions.py \
+  73795a52a17c7ee7e95c213a22135c96 \
+  284a87a1fb9b589bf7927a9b2cd50321 \
+  0b6873d7aa4f947b144dd55be06359ec
+```
+
+**方式二：编辑脚本列表**
+
+打开 `scripts/logout-sessions.py`，在顶部的 `SESSION_IDS` 列表中填入需要注销的 sessionid：
+
+```python
+SESSION_IDS = [
+    "73795a52a17c7ee7e95c213a22135c96",
+    "284a87a1fb9b589bf7927a9b2cd50321",
+    "0b6873d7aa4f947b144dd55be06359ec",
+]
+```
+
+然后直接运行：
+
+```bash
+python3 scripts/logout-sessions.py
+```
+
+### 输出示例
+
+```
+即梦 AI 历史 Session 强制退出工具
+============================================================
+共 3 个 sessionid 待处理
+
+[1/3] 处理: 73795a52a17c7ee7e95c213a22135c96
+         → ✅  退出成功（服务器端已失效）
+
+[2/3] 处理: 284a87a1fb9b589bf7927a9b2cd50321
+         → ✅  退出成功（服务器端已失效）
+
+[3/3] 处理: caae6be8420d0cee663c2d93a562cbff
+         → ⬜  已失效，无需处理
+
+============================================================
+退出结果汇总：
+============================================================
+  73795a52a17c7ee7e95c213a22135c96  →  ✅  退出成功（服务器端已失效）
+  284a87a1fb9b589bf7927a9b2cd50321  →  ✅  退出成功（服务器端已失效）
+  caae6be8420d0cee663c2d93a562cbff  →  ⬜  已失效，无需处理（无需处理）
+
+  ✅ 成功退出：2 个
+  ⬜ 已失效：  1 个（无需处理）
+```
+
+### 状态说明
+
+| 状态 | 含义 |
+|------|------|
+| ✅ 退出成功 | sessionid 已在服务器端销毁，不可再使用 |
+| ⬜ 已失效   | sessionid 已自然过期，无需处理 |
+| ⚠️ 状态不确定 | 请手动登录对应账号验证，或重试 |
+| ❌ 找不到退出按钮 | 即梦页面结构可能已变更，请反馈 Issue |
+| ❌ 发生异常 | 网络问题或 Playwright 未正确安装 |
+
+> ⚠️ **注意**：退出操作不可逆，执行前请确认 sessionid 列表无误。
+
+---
+
 ## 常见问题
 
 <details>
@@ -469,6 +572,19 @@ npm start
 <summary>sessionid 失效怎么办？</summary>
 
 sessionid 有效期有限，失效后需要重新登录即梦网站获取新的 sessionid。建议配置多个账号以提高可用性。
+
+</details>
+
+<details>
+<summary>sessionid 泄露了怎么强制注销？</summary>
+
+使用项目提供的退出工具，可以在服务器端强制销毁历史 sessionid：
+
+```bash
+python3 scripts/logout-sessions.py <泄露的sessionid>
+```
+
+详见 [安全管理：强制退出历史 Session](#安全管理强制退出历史-session) 章节。
 
 </details>
 
@@ -513,6 +629,13 @@ Authorization: Bearer sessionid1,sessionid2,sessionid3
 </details>
 
 ## 更新日志
+
+### v0.8.7 (2026-03-22) - 新增历史 Session 强制退出工具
+
+- 🔒 **新增 `scripts/logout-sessions.py`**：通过 Playwright headless 浏览器模拟点击退出操作，批量强制注销历史 sessionid
+- 🔒 **退出原理**：注入 sessionid → 打开即梦主页 → 点击「设置 → 退出」→ 调用 `/passport/web/logout/` 接口 → 服务器端 Session 彻底销毁
+- 📝 **支持命令行传参**：`python3 scripts/logout-sessions.py <sid1> [sid2] ...`，或在脚本顶部填写 `SESSION_IDS` 列表批量处理
+- 📝 **状态检测**：自动识别已失效的 sessionid 并跳过，退出后实时验证 `window.__isLogined` 状态
 
 ### v0.8.6 (2026-02-20) - jimeng-5.0 正式版模型更新
 
